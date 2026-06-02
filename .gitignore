@@ -1,0 +1,19 @@
+# R / RStudio
+.Rhistory
+.RData
+.Rproj.user/
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.log
+*.tmp
+
+# Figures (optional: keep or remove depending on your preference)
+figures/*.png
+figures/*.pdf
+
+# Shiny / cache
+rsconnect/
+.cache/
