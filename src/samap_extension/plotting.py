@@ -23,6 +23,11 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
                   figsize=(16, 10), dpi=150,
                   node_width=0.015, node_pad=None,
                   flow_alpha=0.45, label_fontsize=8,
+                  palette=None,
+                  palette_file=None,
+                  palette_cluster_col="cluster_id",
+                  palette_label_col="label",
+                  palette_color_col="color",
                   save_to=None, show=True):
     """Three-column Sankey diagram for a three-species SAMap analysis.
 
@@ -48,7 +53,22 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
             axes units. Computed adaptively when ``None``.
         flow_alpha: Transparency of flow ribbons. Defaults to 0.45.
         label_fontsize: Font size for node labels. Defaults to 8.
-        save_to: File path for PNG/PDF export. Skipped when ``None``.
+        palette: Optional ``{node_label: color}`` dict mapping node labels
+            to colours. Labels may be full (``"ml_neural_1"``) or
+            cluster-only (``"neural_1"``); full matches take precedence.
+            Takes precedence over ``palette_file``. When ``None`` and no
+            ``palette_file`` is given, the built-in 20-colour palette is
+            used.
+        palette_file: Path to a TSV file with three columns: original
+            cluster IDs, display labels, and colour values. Uses the same
+            format as ``plot_joint_umap``. Ignored when ``palette`` is
+            provided.
+        palette_cluster_col: Column containing the original cluster IDs.
+            Defaults to ``"cluster_id"``.
+        palette_label_col: Column containing the display labels shown on
+            the Sankey bars. Defaults to ``"label"``.
+        palette_color_col: Column containing colour values (hex or named).
+            Defaults to ``"color"``.
         show: Call ``plt.show()`` after drawing. Defaults to ``True``.
 
     Returns:
@@ -98,6 +118,47 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
     if e_lc.empty and e_cr.empty:
         raise ValueError("No edges survive align_thr filtering.")
 
+    _default_palette = [
+        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+        "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+        "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
+        "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
+    ]
+
+    # Build node→color lookup: palette dict > palette_file > built-in
+    _node_colors: dict = {}
+    if palette is not None:
+        _node_colors = {str(k).strip(): str(v).strip() for k, v in palette.items()}
+    elif palette_file is not None:
+        pal_df = pd.read_csv(palette_file, sep="\t", dtype=str)
+        missing = {palette_cluster_col, palette_color_col} - set(pal_df.columns)
+        if missing:
+            raise ValueError(
+                f"palette_file is missing columns: {missing}. "
+                f"Available: {list(pal_df.columns)}"
+            )
+        _node_colors = dict(zip(
+            pal_df[palette_cluster_col].str.strip(),
+            pal_df[palette_color_col].str.strip(),
+        ))
+
+    def _node_color(label: str, fallback_index: int) -> str:
+        """Resolve colour for a node label.
+
+        Lookup order:
+          1. Exact match on full label (e.g. 'ml_neural_1').
+          2. Match on cluster portion only — label with species prefix
+             stripped (e.g. 'neural_1' from 'ml_neural_1').
+          3. Built-in palette by position.
+        """
+        if label in _node_colors:
+            return _node_colors[label]
+        # strip species prefix (everything up to and including the first '_')
+        cluster_only = label.split("_", 1)[-1] if "_" in label else label
+        if cluster_only in _node_colors:
+            return _node_colors[cluster_only]
+        return _default_palette[fallback_index % len(_default_palette)]
+
     # Node sets (natsorted so cluster_1 < cluster_2 < cluster_10)
     left_nodes   = natsorted(set(e_lc["source"].tolist()) if not e_lc.empty else [])
     center_nodes = natsorted(
@@ -138,9 +199,9 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
             "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
             "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
             "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5"]
-    col_l = {n: _pal[i % 20] for i, n in enumerate(left_nodes)}
-    col_c = {n: _pal[i % 20] for i, n in enumerate(center_nodes)}
-    col_r = {n: _pal[i % 20] for i, n in enumerate(right_nodes)}
+    col_l = {n: _node_color(n, i) for i, n in enumerate(left_nodes)}
+    col_c = {n: _node_color(n, i) for i, n in enumerate(center_nodes)}
+    col_r = {n: _node_color(n, i) for i, n in enumerate(right_nodes)}
 
     NW = node_width
     x_l, x_c, x_r = 0.12, 0.50, 0.88
@@ -153,17 +214,17 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
     # Draw node bars and labels
     for n, (y0, h) in pos_l.items():
         ax.add_patch(plt.Rectangle((x_l, y0), NW, h, fc=col_l[n], ec="none", zorder=3))
-        ax.text(x_l - 0.005, y0 + h / 2, n, ha="right", va="center",
+        ax.text(x_l - 0.005, y0 + h / 2, _node_label(n), ha="right", va="center",
                 fontsize=label_fontsize, clip_on=False)
 
     for n, (y0, h) in pos_c.items():
         ax.add_patch(plt.Rectangle((x_c - NW / 2, y0), NW, h, fc=col_c[n], ec="none", zorder=3))
-        ax.text(x_c + NW / 2 + 0.005, y0 + h / 2, n, ha="left", va="center",
+        ax.text(x_c + NW / 2 + 0.005, y0 + h / 2, _node_label(n), ha="left", va="center",
                 fontsize=label_fontsize, clip_on=False)
 
     for n, (y0, h) in pos_r.items():
         ax.add_patch(plt.Rectangle((x_r - NW, y0), NW, h, fc=col_r[n], ec="none", zorder=3))
-        ax.text(x_r + 0.005, y0 + h / 2, n, ha="left", va="center",
+        ax.text(x_r + 0.005, y0 + h / 2, _node_label(n), ha="left", va="center",
                 fontsize=label_fontsize, clip_on=False)
 
     # Column titles
@@ -490,6 +551,7 @@ def plot_joint_umap(
     palette=None,
     palette_file=None,
     palette_cluster_col="cluster_id",
+    palette_label_col="label",
     palette_color_col="color",
     save_to=None,
 ):
