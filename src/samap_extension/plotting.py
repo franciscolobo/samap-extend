@@ -18,7 +18,6 @@ from matplotlib.lines import Line2D
 # ---------------------------------------------------------------------------
 # SAMap — Sankey
 # ---------------------------------------------------------------------------
-
 def sankey_plot_3(M, species_order, align_thr=0.1,
                   figsize=(16, 10), dpi=150,
                   node_width=0.015, node_pad=None,
@@ -69,6 +68,7 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
             the Sankey bars. Defaults to ``"label"``.
         palette_color_col: Column containing colour values (hex or named).
             Defaults to ``"color"``.
+        save_to: File path to save the figure. Skipped when ``None``.
         show: Call ``plt.show()`` after drawing. Defaults to ``True``.
 
     Returns:
@@ -125,8 +125,9 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
         "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
     ]
 
-    # Build node→color lookup: palette dict > palette_file > built-in
+    # Build node→color and node→label lookups
     _node_colors: dict = {}
+    _node_labels: dict = {}
     if palette is not None:
         _node_colors = {str(k).strip(): str(v).strip() for k, v in palette.items()}
     elif palette_file is not None:
@@ -141,23 +142,41 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
             pal_df[palette_cluster_col].str.strip(),
             pal_df[palette_color_col].str.strip(),
         ))
+        if palette_label_col in pal_df.columns:
+            _node_labels = dict(zip(
+                pal_df[palette_cluster_col].str.strip(),
+                pal_df[palette_label_col].str.strip(),
+            ))
 
     def _node_color(label: str, fallback_index: int) -> str:
         """Resolve colour for a node label.
 
         Lookup order:
           1. Exact match on full label (e.g. 'ml_neural_1').
-          2. Match on cluster portion only — label with species prefix
-             stripped (e.g. 'neural_1' from 'ml_neural_1').
+          2. Match on cluster portion only (e.g. 'neural_1').
           3. Built-in palette by position.
         """
         if label in _node_colors:
             return _node_colors[label]
-        # strip species prefix (everything up to and including the first '_')
         cluster_only = label.split("_", 1)[-1] if "_" in label else label
         if cluster_only in _node_colors:
             return _node_colors[cluster_only]
         return _default_palette[fallback_index % len(_default_palette)]
+
+    def _node_label(label: str) -> str:
+        """Resolve display label for a node.
+
+        Lookup order:
+          1. Exact match on full label (e.g. 'ml_neural_1').
+          2. Match on cluster portion only (e.g. 'neural_1').
+          3. Fall back to the raw label string.
+        """
+        if label in _node_labels:
+            return _node_labels[label]
+        cluster_only = label.split("_", 1)[-1] if "_" in label else label
+        if cluster_only in _node_labels:
+            return _node_labels[cluster_only]
+        return label
 
     # Node sets (natsorted so cluster_1 < cluster_2 < cluster_10)
     left_nodes   = natsorted(set(e_lc["source"].tolist()) if not e_lc.empty else [])
@@ -194,11 +213,6 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
     pos_c, sc_c = lay(center_nodes, w_c, _pad)
     pos_r, sc_r = lay(right_nodes,  w_r, _pad)
 
-    # Colors
-    _pal = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-            "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
-            "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
-            "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5"]
     col_l = {n: _node_color(n, i) for i, n in enumerate(left_nodes)}
     col_c = {n: _node_color(n, i) for i, n in enumerate(center_nodes)}
     col_r = {n: _node_color(n, i) for i, n in enumerate(right_nodes)}
@@ -251,31 +265,31 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
         ax.add_patch(PathPatch(Path(verts, codes),
                                fc=color, ec="none", alpha=flow_alpha, zorder=1))
 
-    # Flow offset trackers (how far up each node's bar we've consumed)
+    # Flow offset trackers
     off_l_r = {n: pos_l[n][0] for n in left_nodes}
     off_c_l = {n: pos_c[n][0] for n in center_nodes}
     off_c_r = {n: pos_c[n][0] for n in center_nodes}
     off_r_l = {n: pos_r[n][0] for n in right_nodes}
 
-    # sm → ml flows
+    # left → center flows
     for _, row in e_lc.sort_values("value", ascending=False).iterrows():
         src, tgt, val = row["source"], row["target"], float(row["value"])
         if src not in pos_l or tgt not in pos_c:
             continue
         h_l, h_c = val * sc_l, val * sc_c
         draw_flow(x_l + NW, off_l_r[src], h_l,
-                  x_c - NW / 2, off_c_l[tgt], h_c, col_c[tgt])
+                  x_c - NW / 2, off_c_l[tgt], h_c, col_l[src])
         off_l_r[src] += h_l
         off_c_l[tgt] += h_c
 
-    # ml → sc flows
+    # center → right flows
     for _, row in e_cr.sort_values("value", ascending=False).iterrows():
         src, tgt, val = row["source"], row["target"], float(row["value"])
         if src not in pos_c or tgt not in pos_r:
             continue
         h_c, h_r = val * sc_c, val * sc_r
         draw_flow(x_c + NW / 2, off_c_r[src], h_c,
-                  x_r - NW, off_r_l[tgt], h_r, col_c[src])
+                  x_r - NW, off_r_l[tgt], h_r, col_r[tgt])
         off_c_r[src] += h_c
         off_r_l[tgt] += h_r
 
@@ -290,7 +304,6 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
         plt.close(fig)
 
     return fig, ax
-
 
 # ---------------------------------------------------------------------------
 # SAMap — UMAP scatter
@@ -310,13 +323,17 @@ def square_scatter(
     s=None,
     ss=None,
     axes=None,
+    shuffle=True,
+    random_seed=0,
+    embedding_key="X_umap_samap",
+    alpha=1.0,
     **kwargs,
 ):
     """Render a SAMap UMAP scatter on a square, publication-ready Axes.
 
-    Wraps ``sm.scatter()``, enforces equal aspect ratio and a centred
-    view window, strips any extra axes that SAMap creates internally,
-    and optionally adds a clean legend.
+    Collects per-species UMAP coordinates and optionally shuffles all
+    cells into a single randomised draw order so that no species
+    systematically occludes another.
 
     Args:
         sm: A ``samap.SAMAP`` instance.
@@ -324,7 +341,7 @@ def square_scatter(
             Defaults to ``(8, 8)``.
         dpi: Figure resolution. Defaults to 600.
         COLORS: ``{species_id: color}`` mapping for point and legend
-            colours. When ``None`` SAMap's defaults apply.
+            colours. When ``None`` a fixed default colour cycle is used.
         species_labels: ``{species_id: display_label}`` mapping used
             only in the legend. Falls back to ``species_id`` when
             ``None``.
@@ -342,19 +359,29 @@ def square_scatter(
             precedence over ``s``.
         axes: Existing ``matplotlib.Axes`` to draw onto. A new figure
             and axes are created when ``None``.
-        **kwargs: Forwarded to ``sm.scatter()``. The keys
-            ``legend_loc``, ``legend_loc_bounds``, and
-            ``legend_fontsize`` are stripped before forwarding to avoid
-            conflicts.
+        shuffle: When ``True``, randomise the draw order of all cells
+            so that species are intermixed rather than layered.
+            Defaults to ``True``.
+        random_seed: Seed for the random shuffle, for reproducibility.
+            Defaults to 0.
+        embedding_key: Key in ``.obsm`` for the joint UMAP coordinates.
+            Defaults to ``"X_umap_samap"``.
+        alpha: Opacity of scatter points. Defaults to 1.0.
+        **kwargs: Forwarded to ``ax.scatter()``.
 
     Returns:
         A ``(fig, ax)`` tuple.
     """
-    for bad in ("legend_loc", "legend_loc_bounds", "legend_fontsize"):
-        kwargs.pop(bad, None)
+    _default_colors = [
+        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+        "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    ]
+    colors = COLORS or {sid: _default_colors[i % len(_default_colors)]
+                        for i, sid in enumerate(sm.ids)}
 
     if ss is None and s is not None:
         ss = {sid: float(s) for sid in sm.ids}
+    ss = ss or {sid: 6.0 for sid in sm.ids}
 
     if axes is None:
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
@@ -364,12 +391,36 @@ def square_scatter(
         fig.set_size_inches(*figsize)
         fig.set_dpi(dpi)
 
-    sm.scatter(axes=ax, COLORS=(COLORS or {}), ss=(ss or {}), **kwargs)
+    # Collect coordinates, colors, and sizes for every cell
+    all_x, all_y, all_c, all_s = [], [], [], []
+    for sid in sm.ids:
+        adata = sm.sams[sid].adata
+        if embedding_key not in adata.obsm:
+            raise KeyError(
+                f"Embedding key '{embedding_key}' not found in obsm for "
+                f"species '{sid}'. Available keys: {list(adata.obsm.keys())}"
+            )
+        xy = adata.obsm[embedding_key]
+        n = xy.shape[0]
+        all_x.append(xy[:, 0])
+        all_y.append(xy[:, 1])
+        all_c.extend([colors[sid]] * n)
+        all_s.extend([ss[sid]] * n)
 
-    for extra in list(fig.axes):
-        if extra is not ax:
-            fig.delaxes(extra)
+    all_x = np.concatenate(all_x)
+    all_y = np.concatenate(all_y)
+    all_c = np.array(all_c)
+    all_s = np.array(all_s)
 
+    if shuffle:
+        rng = np.random.default_rng(random_seed)
+        idx = rng.permutation(len(all_x))
+        all_x, all_y, all_c, all_s = all_x[idx], all_y[idx], all_c[idx], all_s[idx]
+
+    ax.scatter(all_x, all_y, c=all_c, s=all_s, alpha=alpha,
+               linewidths=0, rasterized=True, **kwargs)
+
+    # Square, centred view window
     x0, x1 = ax.get_xlim()
     y0, y1 = ax.get_ylim()
     cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
@@ -553,12 +604,18 @@ def plot_joint_umap(
     palette_cluster_col="cluster_id",
     palette_label_col="label",
     palette_color_col="color",
+    label_clusters=False,
+    label_fontsize=8,
+    label_fontweight="bold",
+    label_outline=True,
     save_to=None,
 ):
     """Plot a SAMap joint UMAP highlighting cell-type labels for one species.
 
     Renders two layers: background points from all other species in gray,
     and foreground points from ``species`` coloured by ``label_col``.
+    Optionally annotates each cluster with its display label at the
+    centroid of its points.
 
     Args:
         sm: A ``samap.SAMAP`` instance whose ``sams`` dict holds per-species
@@ -588,8 +645,20 @@ def plot_joint_umap(
             palette. Defaults to ``None``.
         palette_cluster_col: Column name in ``palette_file`` that
             contains cluster IDs. Defaults to ``"cluster_id"``.
+        palette_label_col: Column name in ``palette_file`` that contains
+            display labels for cluster annotation. Defaults to
+            ``"label"``.
         palette_color_col: Column name in ``palette_file`` that contains
             colour values (hex or named). Defaults to ``"color"``.
+        label_clusters: When ``True``, annotate each cluster with its
+            display label at the centroid of its UMAP coordinates.
+            Defaults to ``False``.
+        label_fontsize: Font size for cluster labels. Defaults to 8.
+        label_fontweight: Font weight for cluster labels. Defaults to
+            ``"bold"``.
+        label_outline: When ``True``, adds a white outline around each
+            label for legibility over dense point clouds. Defaults to
+            ``True``.
         save_to: File path to save the figure (e.g. ``"umap.png"``).
             Skipped when ``None``.
 
@@ -603,6 +672,7 @@ def plot_joint_umap(
             ``.obs``.
     """
     import anndata as ad
+    from matplotlib import patheffects
 
     adatas = {k: sm.sams[k].adata for k in sm.sams}
 
@@ -642,7 +712,8 @@ def plot_joint_umap(
         "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
     ]
 
-    # Build color map: palette_file > palette > built-in default
+    # Build color and label maps
+    _file_labels: dict = {}
     if palette_file is not None:
         pal_df = pd.read_csv(palette_file, sep="\t", dtype=str)
         missing = {palette_cluster_col, palette_color_col} - set(pal_df.columns)
@@ -655,7 +726,11 @@ def plot_joint_umap(
             pal_df[palette_cluster_col].str.strip(),
             pal_df[palette_color_col].str.strip(),
         ))
-        # Fill any clusters missing from file with the built-in palette
+        if palette_label_col in pal_df.columns:
+            _file_labels = dict(zip(
+                pal_df[palette_cluster_col].str.strip(),
+                pal_df[palette_label_col].str.strip(),
+            ))
         color_map = {"other": other_color}
         color_map.update({
             c: file_palette.get(c, _default_palette[i % len(_default_palette)])
@@ -665,13 +740,23 @@ def plot_joint_umap(
         _palette = palette or _default_palette
         color_map = {"other": other_color}
         color_map.update({c: _palette[i % len(_palette)] for i, c in enumerate(target_cats)})
+
+    def _display_label(cluster_id: str) -> str:
+        """Resolve display label: palette_file label > cluster_id."""
+        if cluster_id in _file_labels:
+            return _file_labels[cluster_id]
+        cluster_only = cluster_id.split("_", 1)[-1] if "_" in cluster_id else cluster_id
+        if cluster_only in _file_labels:
+            return _file_labels[cluster_only]
+        return cluster_id
+
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
     xy = combined.obsm[embedding_key]
     is_target = combined.obs["species"].values == species
     labels = combined.obs["_plot_labels"].values
 
-    # Layer 1 — background: all non-target species cells in other_color
+    # Layer 1 — background
     ax.scatter(
         xy[~is_target, 0], xy[~is_target, 1],
         c=other_color,
@@ -681,7 +766,7 @@ def plot_joint_umap(
         rasterized=True,
     )
 
-    # Layer 2 — foreground: target species cells coloured by cluster label
+    # Layer 2 — foreground
     if target_cats:
         target_colors = [color_map[lbl] for lbl in labels[is_target]]
         ax.scatter(
@@ -692,10 +777,63 @@ def plot_joint_umap(
             rasterized=True,
         )
 
-        # Legend — one entry per target cluster
+        # Cluster centroid labels
+        if label_clusters:
+            target_xy = xy[is_target]
+            target_labels = labels[is_target]
+            pe = (
+                [patheffects.withStroke(linewidth=2, foreground="white")]
+                if label_outline else []
+            )
+            texts = []
+            for cat in target_cats:
+                cat_mask = target_labels == cat
+                if not cat_mask.any():
+                    continue
+                cat_xy = target_xy[cat_mask]
+                if len(cat_xy) >= 4:
+                    from scipy.stats import gaussian_kde
+                    kde = gaussian_kde(cat_xy.T)
+                    density = kde(cat_xy.T)
+                    peak = cat_xy[density.argmax()]
+                    cx, cy = peak[0], peak[1]
+                else:
+                    cx, cy = cat_xy[:, 0].mean(), cat_xy[:, 1].mean()
+                t = ax.text(
+                    cx, cy,
+                    _display_label(cat),
+                    fontsize=label_fontsize,
+                    fontweight=label_fontweight,
+                    ha="center", va="center",
+                    color=color_map[cat],
+                    path_effects=pe,
+                )
+                texts.append(t)
+
+            if texts:
+                try:
+                    from adjustText import adjust_text
+                    adjust_text(
+                        texts,
+                        ax=ax,
+                        expand=(1.2, 1.4),
+                        force_text=(0.3, 0.5),
+                        force_static=(0.1, 0.2),
+                        arrowprops=dict(arrowstyle="-", color="gray",
+                                        lw=0.5, alpha=0.6),
+                    )
+                except ImportError:
+                    warnings.warn(
+                        "adjustText is not installed; cluster labels may overlap. "
+                        "Install it with: pip install adjustText",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+
+        # Legend
         handles = [
             Line2D([0], [0], marker="o", linestyle="None",
-                   label=cat, markerfacecolor=color_map[cat],
+                   label=_display_label(cat), markerfacecolor=color_map[cat],
                    markeredgecolor="none", markersize=8)
             for cat in target_cats
         ]

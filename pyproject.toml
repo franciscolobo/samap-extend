@@ -4,27 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "samap-extension"
-version = "0.1.0"
+dynamic = ["version"]
 authors = [
-  { name="CDBL", email="pereiralobof2@nih.gov" },
+    { name = "Francisco Pereira Lobo", email = "pereiralobof2@nih.gov" },
 ]
-description = "SAMap cross-species analysis and plotting tools for CDBL."
+description = "Extensions for SAMap cross-species analysis and visualization."
 readme = "README.md"
-# Target Python 3.9 explicitly — SAMap's stack requires it.
-requires-python = ">=3.9,<3.10"
-license = { file="LICENSE" }
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+
+dependencies = [
+    "anndata",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "scanpy",
+    "scipy",
+]
+
 classifiers = [
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
-# No dependencies declared — this package must be installed with
-# `pip install --no-deps` into the SAMap conda environment.
-# All required packages (numpy, pandas, matplotlib, scanpy, samap,
-# holoviews, bokeh, labcore) are managed by the conda environment.
-# See environment_samap.yml and the Installation section of README.md.
-dependencies = []
+[tool.setuptools.dynamic]
+version = { attr = "samap_extension.__version__" }
 
 [project.urls]
 Homepage = "https://github.com/franciscolobo/samap-extension"

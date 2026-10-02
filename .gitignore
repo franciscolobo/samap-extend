@@ -1,8 +1,3 @@
-# R / RStudio
-.Rhistory
-.RData
-.Rproj.user/
-
 # macOS
 .DS_Store
 
@@ -17,3 +12,24 @@ figures/*.pdf
 # Shiny / cache
 rsconnect/
 .cache/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Packaging artifacts
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
