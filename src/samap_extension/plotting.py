@@ -92,7 +92,7 @@ def sankey_plot_3(M, species_order, align_thr=0.1,
     def _prep(mat_df, src_sp, tgt_sp):
         rows = np.array([s.strip() for s in mat_df.index.astype(str)])
         cols = np.array([s.strip() for s in mat_df.columns.astype(str)])
-        A = np.asarray(mat_df.values, dtype=float)
+        A = mat_df.to_numpy(dtype=float, copy=True)
         A[~np.isfinite(A)] = 0.0
         A[A < align_thr] = 0.0
         ri, ci = A.nonzero()
